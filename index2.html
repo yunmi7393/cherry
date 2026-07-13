@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>바운스볼 레트로 (Bounce Ball)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a24;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Malgun Gothic', sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        canvas {
+            background-color: #23232e;
+            display: block;
+        }
+
+        .ui-panel {
+            display: flex;
+            justify-content: space-between;
+            width: 800px;
+            color: #fff;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px 20px;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
+        .instructions {
+            color: #8a8a9e;
+            margin-top: 15px;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel">
+        <div>STAGE 1</div>
+        <div id="star-count">STARS: 0 / 3</div>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+    </div>
+
+    <div class="instructions">
+        조작 방법: 키보드 방향키 <strong>← / →</strong> (또는 A / D) | 목표: 모든 노란 별을 획득하세요!
+    </div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const starCountUI = document.getElementById("star-count");
+
+// --- 게임 물리 및 설정 변수 ---
+const GRAVITY = 0.35;          // 중력 가속도
+const BOUNCE_FORCE = -9.2;     // 튀어오르는 힘
+const HORIZONTAL_SPEED = 4.5;  // 좌우 이동 속도
+
+// 공 (플레이어) 상태
+const ball = {
+    x: 80,
+    y: 350,
+    radius: 12,
+    vx: 0,
+    vy: 0,
+    color: "#ff4757"
+};
+
+// 블록 종류 정의
+// 1 = 일반 블록(초록), 2 = 가시 블록(빨강), 3 = 슈퍼 점프 블록(보라)
+const BLOCK_TYPES = {
+    NORMAL: 1,
+    SPIKE: 2,
+    SUPER: 3
+};
+
+// 맵 배치 (X, Y, 가로, 세로, 타입)
+const platforms = [
+    // 바닥 및 기본 계단
+    { x: 30,  y: 420, w: 120, h: 25, type: BLOCK_TYPES.NORMAL },
+    { x: 200, y: 350, w: 100, h: 25, type: BLOCK_TYPES.NORMAL },
+    { x: 350, y: 280, w: 100, h: 25, type: BLOCK_TYPES.NORMAL },
+    
+    // 중간 함정 구역 (가시)
+    { x: 450, y: 450, w: 200, h: 25, type: BLOCK_TYPES.SPIKE },
+    
+    // 오른쪽 상단 및 점프대
+    { x: 500, y: 220, w: 100, h: 25, type: BLOCK_TYPES.NORMAL },
+    { x: 670, y: 320, w: 80,  h: 25, type: BLOCK_TYPES.SUPER }, // 슈퍼 점프 발판
+    { x: 650, y: 130, w: 110, h: 25, type: BLOCK_TYPES.NORMAL }
+];
+
+// 수집 요소 (별)
+let stars = [
+    { x: 250, y: 280, r: 10, collected: false },
+    { x: 550, y: 150, r: 10, collected: false },
+    { x: 700, y: 60,  r: 10, collected: false }
+];
+
+// 키 입력 핸들러
+const keys = { left: false, right: false };
+
+document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") keys.left = true;
+    if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") keys.right = true;
+});
+
+document.addEventListener("keyup", (e) => {
+    if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") keys.left = false;
+    if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") keys.right = false;
+});
+
+// 게임 오버 혹은 리셋 처리
+function resetGame() {
+    ball.x = 80;
+    ball.y = 350;
+    ball.vx = 0;
+    ball.vy = 0;
+    stars.forEach(s => s.collected = false);
+    updateUI();
+}
+
+function updateUI() {
+    const collectedCount = stars.filter(s => s.collected).length;
+    starCountUI.innerText = `STARS: ${collectedCount} / ${stars.length}`;
+}
+
+// 핵심 업데이트 로직
+function update() {
+    // 1. 좌우 이동 속도 세팅
+    if (keys.left) ball.vx = -HORIZONTAL_SPEED;
+    else if (keys.right) ball.vx = HORIZONTAL_SPEED;
+    else ball.vx = 0;
+
+    // 2. 중력 가속도 적용
+    ball.vy += GRAVITY;
+
+    // 3. 임시 다음 위치 계산
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    // 4. 벽면 이탈 방지 (화면 좌우 좌측 처리)
+    if (ball.x - ball.radius < 0) ball.x = ball.radius;
+    if (ball.x + ball.radius > canvas.width) ball.x = canvas.width - ball.radius;
+
+    // 5. 낙사 처리 (화면 바닥 아래로 추락 시)
+    if (ball.y - ball.radius > canvas.height) {
+        resetGame();
+        return;
+    }
+
+    // 6. 발판 충돌 체크 (상면 착지 위주 충돌 메커니즘)
+    platforms.forEach(p => {
+        // 공이 발판의 가로 범위 안에 있는지 검사
+        if (ball.x + ball.radius * 0.6 > p.x && ball.x - ball.radius * 0.6 < p.x + p.w) {
+            // 내려오는 중이면서 발판 상단면에 걸쳤을 때
+            if (ball.vy > 0 && 
+                ball.y + ball.radius >= p.y && 
+                ball.y - ball.radius < p.y + p.h) {
+                
+                if (p.type === BLOCK_TYPES.SPIKE) {
+                    // 가시 블록 충돌 -> 리셋
+                    resetGame();
+                } else if (p.type === BLOCK_TYPES.SUPER) {
+                    // 슈퍼 점프 블록 -> 더 높게 튕김
+                    ball.y = p.y - ball.radius;
+                    ball.vy = BOUNCE_FORCE * 1.4;
+                } else {
+                    // 일반 블록 -> 일반 점프
+                    ball.y = p.y - ball.radius;
+                    ball.vy = BOUNCE_FORCE;
+                }
+            }
+        }
+    });
+
+    // 7. 별 획득 조건 체크
+    let allCollected = true;
+    stars.forEach(s => {
+        if (!s.collected) {
+            allCollected = false;
+            // 공과 별 사이의 거리 계산
+            const dist = Math.hypot(ball.x - s.x, ball.y - s.y);
+            if (dist < ball.radius + s.r) {
+                s.collected = true;
+                updateUI();
+            }
+        }
+    });
+
+    // 8. 게임 클리어 체크
+    if (allCollected) {
+        alert("🎉 대단해요! 스테이지를 클리어했습니다!");
+        resetGame();
+    }
+}
+
+// 화면 그리기 (렌더링)
+function draw() {
+    // 잔상 효과 없이 깔끔하게 지우기
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 격자 배경 스타일 라인 그리기 (레트로 감성)
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.03)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < canvas.width; i += 40) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+    }
+    for (let j = 0; j < canvas.height; j += 40) {
+        ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
+    }
+
+    // 발판 그리기
+    platforms.forEach(p => {
+        if (p.type === BLOCK_TYPES.SPIKE) {
+            ctx.fillStyle = "#ff5252"; // 가시: 빨간색
+        } else if (p.type === BLOCK_TYPES.SUPER) {
+            ctx.fillStyle = "#b537ff"; // 슈퍼점프: 보라색
+        } else {
+            ctx.fillStyle = "#2ed573"; // 일반: 녹색
+        }
+        
+        // 라운드 이펙트 처럼 사각형 그리기
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        
+        // 가시 모양 선 추가 디테일
+        if (p.type === BLOCK_TYPES.SPIKE) {
+            ctx.fillStyle = "#ffffff";
+            for(let i = p.x + 5; i < p.x + p.w; i += 15) {
+                ctx.beginPath();
+                ctx.moveTo(i, p.y);
+                ctx.lineTo(i + 5, p.y - 6);
+                ctx.lineTo(i + 10, p.y);
+                ctx.fill();
+            }
+        }
+    });
+
+    // 별(목표 아이템) 그리기
+    stars.forEach(s => {
+        if (!s.collected) {
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+            ctx.fillStyle = "#ffd32a";
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = "#ffd32a";
+            ctx.fill();
+            ctx.closePath();
+            // 그림자 초기화
+            ctx.shadowBlur = 0;
+        }
+    });
+
+    // 플레이어 공 그리기
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    ctx.fillStyle = ball.color;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = ball.color;
+    ctx.fill();
+    ctx.closePath();
+    ctx.shadowBlur = 0;
+}
+
+// 메인 루프 실행 엔진
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+// 최초 실행시 UI 초기화 후 루프 가동
+updateUI();
+loop();
+</script>
+</body>
+</html>
